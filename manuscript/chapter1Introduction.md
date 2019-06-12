@@ -29,6 +29,23 @@
 作为第一次尝试，您可以考虑为每个线程分配相同的输入域份额。 每个线程可能会检查10的9次方个数字，如图1.1所示。 出于基本但重要的原因，这种方法失败了。 相同范围的投入不一定产生相同数量的工作。 素数不均匀地发生：1到109之间有许多素数，但在9乘以10的9次方到10的10次方之间几乎没有。更糟糕的是，每个素数的计算时间在所有范围内都不相同：通常需要更长的时间来测试是否大数是素数而不是小数。 简而言之，没有理由相信工作将在线程之间平均分配，并且即使哪些线程最有效也不清楚。
 
 ```java
+void primePrint {
+    int i = ThreadID.get(); // thread IDs are in {0..9}
+    int block = power(10, 9);
+    for (int j = (i * block) + 1; j <= (i + 1) block; j++) {
+        if (isPrime(j)) 
+            print(j);
+    }
+}
+``` 
+```
+
+![Figure 1.1 Balancing load by dividing up the input domain. Each thread in {0..9} gets an equal subset of the range. ](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-1.png "Figure 1.1 Balancing load by dividing up the input domain. Each thread in {0..9} gets an equal subset of the range.")
+
+
+在线程之间拆分工作的更有前途的方法是一次为每个线程分配一个整数（图1.2）。 当一个线程完成测试整数时，它会要求另一个。 为此，我们引入了一个共享计数器，一个封装整数值的对象，它提供了一个递增其值的 getAndIncrement() 方法，并将计数器的先前值返回给调用者。
+
+```java
 Counter counter = new Counter(1); // shared by all threads
 void primePrint {
     long i = 0;
@@ -42,15 +59,120 @@ void primePrint {
 }
 ```
 
-![Figure 1.1 Balancing load by dividing up the input domain. Each thread in {0..9} gets an equal subset of the range. ](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-1.png "Figure 1.1 Balancing load by dividing up the input domain. Each thread in {0..9} gets an equal subset of the range.")
 
 
+![Figure 1.2 Balancing the work load using a shared counter. Each thread gets a dynamically determined number of numbers to test. ](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-2.png "Figure 1.2 Balancing the work load using a shared counter. Each thread gets a dynamically determined number of numbers to test.")
 
 
+图1.3显示了Java中的Counter的自然实现。 这个计数器实现在单个线程使用时运行良好，但在多个线程共享时失败。 问题在于表达方式:
+
+```java
+return value++;
+```
+
+实际上是以下更复杂代码的缩写：
+
+```java
+long temp = value;
+value = temp + 1;
+return temp;
+```
+
+在此代码片段中，value是Counter对象的成员变量，并在所有线程之间共享。 但是，每个线程都有自己的temp本地副本，它是每个线程的局部变量。
+
+```java
+public class Counter {
+    private long value; // counter starts at one
+    public Counter(int i) { // constructor initializes counter
+        value = i;
+    }
+
+    public long getAndIncrement() { // increment, returning prior value
+        return value++;
+    }
+}
+```
 
 
+![Figure 1.3 An implementation of the shared counter](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-3.png "Figure 1.3 An implementation of the shared counter")
 
 
+现在假设线程 A 和 B 几乎同时调用计数器的 getAndIncrement() 方法。 它们可能同时从 value 读取1，将其本地临时变量设置为1，将 value 设置为2，并且都返回1.此行为不是我们想要的：对计数器的 getAndIncrement() 的并发调用返回相同的值，但我们期望它们返回不同的值。 事实上，它可能会变得更糟。 一个线程可能从 value 读取1，但在将 value 设置为2之前，另一个线程将多次通过增量循环，读取 1 并设置为 2，读取 2 并设置为 3.当第一个线程最终完成其操作时, 将 value 设置为2，它实际上将计数器从 3 设置为 2。
+
+问题的核心是递增计数器的值需要对共享变量进行两个不同的操作：将值字段读入临时变量并将其写回Counter对象。
+
+当你试图让一个人在走廊里正面接近你时会发生类似的事情。 您可能会发现自己正确转向，然后离开几次以避免其他人做同样的事情。 有时你会设法避免撞到它们，有时你却不会碰到它们，事实上，正如我们在后面的章节中看到的那样，这种冲突现象是不可避免的。 在一个直观的层面上，正在发生的事情是你们每个人都在执行两个不同的步骤：查看（“阅读”）对方的当前位置，以及移动（“书写”）到一侧或另一侧。 问题是，当你读到对方的位置时，你无法知道他们是否决定原地不动还是移动到另一侧。 就像你和烦人的陌生人必须决定谁走左边,谁走右边一样，访问共享计数器的线程必须决定谁先执行，谁后执行。
+
+正如我们将在第5章中看到的那样，现代多处理器硬件提供了特殊的读 - 修改 - 写指令(read-modify-write instructions)，允许线程在一个原子（即不可分割的）硬件步骤中读取，修改和写入存储器的值。 对于 Counter 对象，我们可以使用这样的硬件以原子方式递增计数器
+
+我们还可以通过在软件中保证（仅使用读和写指令）来提供这样的原子行为，即一次只有一个线程执行读写序列。 确保一次只有一个线程可以执行特定代码块的问题称为互斥问题，并且是多处理器编程中的经典协调问题之一。
+
+实际上，您不太可能发现自己必须设计自己的互斥算法（相反，您可能会调用库）。 然而，理解如何从基础中实现互斥是一般理解并发计算的必要条件。 没有更有效的方法来学习如何推理基本和无处不在的问题，例如互斥，死锁，有限公平，阻塞与非阻塞同步。
+
+## 1.2 A Fable
+
+我们不将协调问题（例如互斥）视为编程练习，而是将并发协调问题视为物理问题。 现在我们通过一系列寓言，说明一些基本问题。 像大多数寓言作者一样，我们重述了其他人发明的故事（参见本章末尾的章节注释）。
+
+爱丽丝和鲍勃是邻居，他们共用一个院子。 爱丽丝拥有一只猫，鲍勃拥有一只狗。 两只宠物都喜欢在院子里跑来跑去，但（自然地）他们不相处。 在一些不幸的经历之后，爱丽丝和鲍勃同意他们应该协调以确保两只宠物永远不会同时在院子里。 当然，我们排除了不允许任何动物进入空院子的暴力解决方案。
+
+他们应该怎么做？ 爱丽丝和鲍勃需要就相互兼容的程序达成一致，以决定做什么。 我们称这样的协议为协调协议（或简称协议）。
+
+院子很大，所以爱丽丝不能简单地向窗外看，看看鲍勃的狗是否在场。 她也许可以走到鲍勃的家里敲门，但这需要很长时间，如果下雨会怎么样？ 爱丽丝可能会向窗外倾斜并大喊“嘿鲍勃！ 我可以让猫出去吗？“问题是鲍勃可能听不到她的声音。 他可能正在看电视，拜访他的女朋友，或外出购买狗粮。 他们可以尝试通过手机进行协调，但如果鲍勃正在洗澡，开车穿过隧道或给手机电池充电，也会遇到同样的困难。
+
+爱丽丝有一个聪明的主意。 她在鲍勃的窗台上放了一个或多个空啤酒罐（图1.4），在每个窗台上绑一根绳子，然后把绳子放回她家。 鲍勃也这样做。 当她想向鲍勃发送信号时，她猛拉绳子敲击其中一个罐头。 当鲍勃注意到一个罐子被撞倒时，他重置了罐头。
+
+
+![Figure 1.4 Communicating with cans](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-4.png "Figure 1.4 Communicating with cans")
+
+它仍然存在严重缺陷。 问题是，爱丽丝只能在鲍勃的窗台上放置有限数量的罐头，迟早，她将用尽罐头来敲门。 当然，鲍勃在注意到它被击倒后立即重置了一个罐子，但是如果他去春游了呢？ 只要爱丽丝依赖鲍勃来重置啤酒罐，她迟早会跑出去。
+
+所以爱丽丝和鲍勃尝试了不同的方法。 每一个都设置一个旗杆，容易看到另一个。 当爱丽丝想要释放她的猫时，她会做以下事情：
+
+1. 她升起她的旗帜。
+2. 当鲍勃的旗帜降下来时，她释放了她的猫。
+3. 当她的猫回来时，她降下她的旗帜。
+
+鲍勃的行为有点复杂。
+
+1. 他升起他的旗帜。
+2. 当爱丽丝的起至也升起的时候。
+   - 鲍勃降下自己的旗帜。
+   - 鲍勃原地等待，直到爱丽丝的旗帜降下来。
+　 - 鲍勃保持他的旗帜一直升起。
+3. 一旦他的旗帜升起并且她的旗帜下降，他就会释放他的狗。
+4.  当他的狗回来时，他降下他的旗帜。
+
+该协议奖励进一步研究作为爱丽丝和鲍勃问题的解决方案。 在直观的层面上，它的工作原理是以下标志原则。 如果爱丽丝和鲍勃各自
+
+1. 升起他们自己的旗帜之后，马上
+2. 看看对方的旗帜是否升起
+
+然后至少有一个会看到对方的旗帜升起（显然，最后一个看起来会看到对方的旗帜升起）并且不会让他或她的宠物进入院子。 然而，这种观察并不能证明宠物永远不会在院子里。 例如，如果爱丽丝在鲍勃看的时候让她的猫进出院子几次怎么办？
+
+为了证明宠物永远不会在院子里一起，通过矛盾的方式假设宠物可以一起最终进入院子里。 考虑上一次爱丽丝和鲍勃各自举起旗帜，看着对方的旗帜，然后将宠物送到院子里。 当爱丽丝最后看时，她的旗帜已经完全抬起。 她一定没看过鲍勃的旗帜，或者她不会释放猫，所以鲍勃在爱丽丝开始寻找之前一定还没有完成他的旗帜。 因此，当鲍勃最后一次看到，在举起旗帜之后，一定是在爱丽丝开始寻找之后，所以他一定看到爱丽丝的旗帜升起并且不会释放他的狗，这是一个矛盾。
+
+这种矛盾的论证一再出现，值得花一些时间说服自己为什么这种说法是正确的。 值得注意的是，我们从未假设“升起我的旗帜”或“看着你的旗帜”瞬间发生，我们也没有假设这些活动需要多长时间。 我们关心的是这些活动何时开始或结束。
+
+### 1.2.1 Properties of Mutual Exclusion
+
+为了表明标志协议是解决爱丽丝和鲍勃问题的正确方法，我们必须了解解决方案需要哪些属性，然后证明协议满足它们。
+
+首先，我们证明了宠物被排除在院子里的同时，我们称之为互斥的属性。
+
+相互排斥只是感兴趣的几个属性之一。 毕竟，正如我们前面提到的，爱丽丝和鲍勃永远不会释放宠物的协议满足互斥属性，但不太可能满足他们的宠物。 这是另一个至关重要的属性。 首先，如果一只宠物想要进入院子，那么它最终会成功。 其次，如果两只宠物都想要进入院子，那么最终其中至少只有一只能成功。 我们认为这种死锁自由属性(deadlock-freedom property)是必要。
+
+我们声称爱丽丝和鲍勃的协议没有死锁(deadlock-free)。 假设两只宠物都想使用院子。 爱丽丝和鲍勃各自升起了旗帜。 鲍勃最终注意到爱丽丝的旗帜升起，又慢慢降下了旗帜，从而没有让她的猫进入院子。
+
+
+引人注目的另一个特性是饥饿自由 starvation-freedom（有时称为锁定自由 lockout-freedom）：如果宠物想要进入院子，它最终会成功吗？ 在这里，爱丽丝 和 鲍勃 的协议表现不佳。 每当爱丽丝和鲍勃发生冲突时，鲍勃都会向爱丽丝妥协，因此爱丽丝的猫可能一遍又一遍地使用院子，而鲍勃的狗变得越来越不爽。 稍后，我们将看到如何使协议防止饥饿。
+
+感兴趣的最后一个属性是等待。 想象一下，爱丽丝举起她的旗帜，然后突然患上了阑尾炎。 她（和猫）被送往医院，手术成功后，接下来的一周她將在医院接受观察。 虽然鲍勃很放心，爱丽丝很好，他的狗直到爱丽丝回来，才能使用院子一整个星期。 问题是协议规定鲍勃（和他的狗）必须等待爱丽丝降低她的旗帜。 如果爱丽丝被延迟（即使有充分理由），那么鲍勃也会被推迟（没有明显的理由）。
+
+作为容错(fault-tolerance)的一个例子，等待的问题很重要。 通常情况下，我们希望爱丽丝和鲍勃在合理的时间内相互回应，但如果他们不这样做会怎么样？ 从本质上讲，互斥问题需要等待：无论互相排斥协议多么聪明，都不会避免它。 然而，我们看到许多其他协调问题可以在不等待的情况下解决，有时候是以意想不到的方式。
+
+### 1.2.2 The Moral
+
+在回顾了Bob和Alice的协议的优点和缺点之后，我们现在将注意力转回到计算机科学。
 
 
 
