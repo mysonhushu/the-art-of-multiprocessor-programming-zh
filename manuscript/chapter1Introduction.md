@@ -42,6 +42,7 @@ void primePrint {
 }
 ```
 
+[Figure 1.1 Balancing load by dividing up the input domain. Each thread in {0..9} gets an equal subset of the range. ](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-1.png)
 
 
 
