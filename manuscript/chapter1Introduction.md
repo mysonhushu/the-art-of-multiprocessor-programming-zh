@@ -124,6 +124,7 @@ public class Counter {
 
 ![Figure 1.4 Communicating with cans](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure1-4.png "Figure 1.4 Communicating with cans")
 
+
 它仍然存在严重缺陷。 问题是，爱丽丝只能在鲍勃的窗台上放置有限数量的罐头，迟早，她将用尽罐头来敲门。 当然，鲍勃在注意到它被击倒后立即重置了一个罐子，但是如果他去春游了呢？ 只要爱丽丝依赖鲍勃来重置啤酒罐，她迟早会跑出去。
 
 所以爱丽丝和鲍勃尝试了不同的方法。 每一个都设置一个旗杆，容易看到另一个。 当爱丽丝想要释放她的猫时，她会做以下事情：
