@@ -374,7 +374,7 @@ Alice和Bob的大部分寓言改编自Leslie Lamport的邀请地址，参加1984
 
 制定一项策略，允许P个囚犯中至少P-1个囚犯获释。
 
->我没有找到答案，但是我觉得可以用声音的长短传达额外的信息。
+> 参考: https://blog.csdn.net/fudaxing/article/details/93191894
 
 
 **Exercise 6.**
