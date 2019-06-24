@@ -99,3 +99,209 @@ try {
 **Freedom from Starvation** 尝试获取锁的每个线程最终都会成功。 每次调用lock()最终都会返回。 此属性有时称为锁定自由。 
 
 请注意，饥饿自由意味着死锁自由。
+
+互斥属性显然是必不可少的。如果没有此属性，我们无法保证计算结果是正确的。在第1章的术语中，互斥是一种安全属性。死锁自由(deadlock-freedom)属性很重要。这意味着系统永远不会“冻结”(freezes)。个别线程可能永远陷入困境（称为饥饿 starvation），但某些线程会取得进展。在第1章的术语中，死锁自由(deadlock-freedom)是一种活跃的属性。请注意，即使它使用的每个锁都满足deadlock-freedom属性，程序仍然可以死锁。例如，考虑共享锁0和1的线程A和B.首先，A获取0，B获取1.接下来，A尝试获取1，B尝试获取0.线程死锁，因为每个线程等待另一个释放它的锁。
+
+饥饿自由属性(starvation-freedom property),虽然明显可取，是这三个当中最强迫的。稍后，我们将看到实际的互斥算法无法做到饥饿自由。这些算法通常是基于理想的饥饿自由情况下发展的，但实际上是不太可能发生的。然而，理解饥饿的能力对于理解它是否是一个现实的威胁至关重要。
+
+饥饿自由的属性同样很弱。从某种意义上说，它无法确保一个线程在等待一段时间后就一定能进入临界区。稍后，我们将研究限制线程可以等待多长时间的算法。
+
+## 2.3 2-Thread Solutions
+
+我们从两个不充分但有趣的Lock算法开始。
+
+### 2.3.1 The LockOne Class
+
+图2.4显示了LockOne算法。我们的双线程锁定算法遵循以下约定：线程有0和1，调用线程有i，另一个 j = 1  -  i。每个线程通过调用 ThreadID.get() 获取其索引
+
+```java
+class LockOne implements Lock {
+  private boolean[] flag = new boolean[2];
+  // thread-local index, 0 or 1
+  public void lock() {
+    int i = ThreadID.get();
+    int j = 1 - i;
+    flag[i] = true;
+    while (flag[j]) {} // wait
+  }
+
+  public void unlock() {
+    int i = ThreadID.get();
+    flag[i] = false;
+  }
+
+}
+```
+**Figure 2.4 The LockOne algorithm.**
+
+>Pragma 2.3.1 实际上，图2.4 中的布尔标志变量以及后面算法中的 victim 和 label 变量，都必须声明为 **volatile** 才能正常工作。我们将在第３章和附录A中解释原因。
+
+我们使用 write_A(x=v)来表示A将值v赋值给字段x的事件。然后用read_A(v == x) 来表示A从字段x读取值v的事件。当v这个值不重要的时候，有时会被忽略。例如，在图2.4中，事件 write_A(flag[i] = true) 被 lock() 方法的第7行调用时。
+
+>引理 2.3.1. LockOne 算法满足互相排斥。
+
+证明: 假设不满足，那么必然存在整数 j 和 k, 满足 CS_A^J 不触发 CS_B^k 并且 CS_B^k 不触发 CS_A^J。　考虑每一个线程在它的第 k次(j次) 进入临界区前最后一次执行　lock() 方法。
+
+观察代码，我们将发现：
+
+ 
+![formula 2-3](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/formula2-3.png "formula 2.3")
+
+
+![formula 2-3-4](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/formula2-3-4.png "formula 2.3.4")
+
+请注意，一旦 flag[B] 被设置为true, 它的值就会变为true. 根据公式 Eg.2.3.3, 否则，线程A不能将读取标志[B]视为false。
+
+接下来，write_A（flag [A] = true）→r read_B（flag [A] == false）没有插入对flag []数组的插入，这是一个矛盾。
+
+LockOne算法是不合适的，因为它在线程执行时会死锁是交错的。如果writeA（flag [A] = true）和writeB（flag [B] = true）事件发生在readA（flag [B]）和readB（flag [A]）事件之前，则两个线程都会永远等待。然而，LockOne有一个有趣的属性：如果一个线程在另一个线程之前运行，则不会发生死锁，一切都很好。
+
+
+### 2.3.2 The LockTwo Class
+
+图2.5 显示了另外一种lock算法，LockTwo.
+
+```java
+class LockTwo implements Lock {
+  private volatile int victim;
+  public void lock() {
+    int i = ThreadID.get();
+    victim = i;        // let the other go first
+    while ( victim == 1) {} //waite
+  }
+
+  public void unlock() {}
+}
+```
+
+
+![Lemma 2.3.2](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Lemma2-3-2.png "Lemma 2.3.2")
+
+LockTwo类是不合适的，因为如果一个线程完全在另一个线程之前运行它会死锁。然而，LockTwo有一个有趣的属性：如果线程并发运行，则 lock() 方法成功。 LockOne和LockTwo类相互补充：每个类都会在导致另一个死锁的条件下成功。
+
+### 2.3.3 The Peterson Lock
+
+我们现在将LockOne和LockTwo算法结合起来构建一个starvation-free Lock算法，如图2.6所示。该算法可以说是最紧凑，优雅的双线互斥算法。它的发明者之后被称为“彼得森的算法”(Peterson's Algorithm)。
+
+```java
+class Peterson implements Lock {
+  // thread-local index, 0 or 1 
+  private volatile boolean[] flag = new boolean[2];
+  private volatile int victim;
+  public void lock() {
+    int i = ThreadID.get();
+    int j = 1 - i;
+    flag[i] = true; // I'm interested
+    victim = i;     // you go first
+    while(flag[j] && victim == i) {}; //wait
+  }
+  public void unlock() {
+    int i = ThreadID.get();
+    flag[i] = flase; // I'm not interested
+  }
+}
+
+```
+**Figure 2.6 The Peterson lock algorithm.**
+
+
+>Lemma2.3.3 The Peterson lock algorithm satisfies mutual exclusion.
+
+证明：假设不成立，像上面那样，考虑线程A和线程B最后一次执行方法lock(). 检查代码，我们会发现。
+
+```java
+write_A(flag[A] = true)->      (2.3.8)
+write_A(victim =A) -> read_A(flag[B]) -> read_A(victim) -> CS_A
+write_B(flag[B]=true) -> write_B(victim=B) -> write_B(victim=B) -> read_B(flag[A])->read_B(victim)->CS_B      (2.3.9)
+```
+
+假设，在不失一般性的情况下，A是写入的最后一个线程 victimfield 领域。
+
+```java
+write_B(victim = B) -> write_A(victime=A)   (2.3.10)
+```
+
+方程式2.3.10 暗示A观察到的 victim 是方程式2.3.8中A的victim。由于A仍然进入其临界区，因此必须观察到标志[B]为假， 所以我们有
+
+```java
+write_A(victim=A)->read_A(flag[B] == false)    (2.3.11)
+```
+
+方程式2.3.9和方程式2.3.11,将链接符号放在一起，实现如方程式2.3.12.
+```java
+write_B(flag[B]=true)->write_B(victim=B)->write_A(victim=A) -> read_A(flag[B] == false)   (2.3.12)
+```
+
+接下来是 write_B(flag [B] = true)→ read_A(flag [B] == false)。这种观察产生了矛盾，因为在关键部分执行之前没有执行对标志[B]的其他写入。
+
+>Lemma 2.3.4 The Peterson lock algorithm is starvation-free.
+
+证明: 假设没有。假设（不失一般性）A在 lock() 方法中永远运行。它必须执行while语句，等待 flag[B] 变为 false 或者 victim 被设置为B.
+
+当A未能取得进展时，B在做什么？也许B反复进入和离开其关键部分。但是，如果是这样，那么B很快就会将 victim 设置为 B.因为它重新进入临界区域。一旦 victim 被设置为B，它就不会改变，并且A必须最终从 lock() 方法返回，这是一个矛盾。
+
+所以一定是B也卡在它的 lock() 方法调用中，等待标志[A]变为假或者受害者被设置为A.但受害者不能同时是A和B，这是一个矛盾。
+
+>推论 2.3.1 Peterson 锁定算法没有死锁(The Peterson lock algorithm is dealock-free.)
+
+## 2.4 The Filter Lock
+
+我们现在考虑将基于两个现场的互斥协议应用于 N 个线程，这里的N大于2。第一种解决方法，Filter lock, 是Peterson锁定到多个线程的直接概括。第二个解决方案，即Bakery锁，可能是最简单和最知名的n-thread解决方案。
+
+Filter lock, 如图 2.7 所示，创建 n-1　个"waiting rooms", 称之为等级(levels),一个线程，在获取锁之前，必须先遍历这些等级，这些等级在图2.8中有描述，每个等级满足两个重要的属性：
+
+- 至少有一个线程尝试进入该等级并成功。 
+- 如果超过了一个线程尝试进入等级,那么至少有一个线程是阻塞的(例如：继续等待那个等级).
+
+
+
+![Figure 2.7 The Filter lock algorithm](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure2-7.png "Figure 2.7 The Filter lock algorithm")
+
+
+
+![Figure 2.8](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure2-8.png "Figure 2.8")
+
+Peterson锁使用包含两布尔标志元素的数组来指示线程是否正在尝试进入临界区。Filter锁定使用n元素 integer level []数组来概括此概念，其中level [A] 的值表示线程A尝试进入的最高级别。每个线程必须通过 n-1 级别的“排除”才能进入其关键部分。每个级别s 都有一个明显的 victim[s] 字段，用于“过滤掉”一个线程，将其从下一级别排除。
+
+
+最初，线程A处于0级。我们说A在 j>0 时处于j级，当它最后在第17行用 level[A]>=j 完成等待循环时。 （所以j级的线程也是在 j-1 级，依此类推。）
+
+>Lemma 2.4.1 For j between 0 and n - 1, there are at most n - j threads at level j.
+
+证明: 通过对j的归纳。基本情况，其中j = 0，是微不足道的。对于归纳步骤，归纳假设意味着在j-1级最多有n-j + 1个线程。为了表明至少有一个线程不能进入j级，我们通过矛盾来论证：假设有n-j+1个线程在level j 。
+
+
+![Lemma 2.4.1](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure2-8.png "Lemma 2.4.1")
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
