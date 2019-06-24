@@ -85,6 +85,11 @@ try {
 >这个习惯用法确保在进入try块之前获取锁，并且当控制离开块时释放锁，即使块中的某些语句引发意外异常也是如此。
 
 
+
+
+![paragraph 2-1](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/pragraph2-1.png "pragraph 2.1")
+
+
 我们现在正式化了一个好的Lock算法应该满足的属性。 设CSjA(CS A下标，j上标)为A在第j次执行临界区间的间隔。 让我们假设，为简单起见，每个线程经常无限地获取和释放锁定，同时进行其他工作。
 
 **Mutual Exclusion** 不同线程的关键部分不重叠。 对于线程A和B，以及整数j和k，CSkA（CS [A下][k上]）→CSjB(CS [B下][K上]或CSjB(CS [B下][j上]→CS kA(CS [A下][k上]。
