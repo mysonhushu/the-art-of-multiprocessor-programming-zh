@@ -274,6 +274,11 @@ Peterson锁使用包含两布尔标志元素的数组来指示线程是否正在
 ![Lemma 2.4.1](https://github.com/mysonhushu/the-art-of-multiprocessor-programming-zh/blob/master/manuscript/images/Figure2-8.png "Lemma 2.4.1")
 
 
+Perterson锁使用双元素bool标志数组来指示线程是否正在尝试进入临界区。Filter锁定使用n元素integer level []数组来概括此概念，其中level [A]的值表示线程A尝试输入的最高级别。每个线程必须通过n  -  1级别的“排除”才能进入其关键部分。 每个级别 e 都有一个明显的victim [e] 字段，用于“过滤掉”一个线程，将其从下一级别排除。
+最初，线程A处于0级。我们说A在j> 0时处于j级，当它最后在第17行用等级[A] j完成等待循环时。 （所以级别j的线程也在级别j  -  1，依此类推。）
+
+引理 2.4.1. 位于 0 和 n - 1 之间的 j 来说，Level j 等级最多有 n-1 个线程。
+
 
 
 
